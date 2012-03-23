@@ -56,6 +56,7 @@ static void s3c2410_hwcontrol(struct mtd_info *mtd, int cmd, unsigned int ctrl)
 	struct nand_chip *chip = mtd->priv;
 	struct s3c2410_nand *nand = s3c2410_get_base_nand();
 
+
 	debug("hwcontrol(): 0x%02x 0x%02x\n", cmd, ctrl);
 
 	if (ctrl & NAND_CTRL_CHANGE) {
