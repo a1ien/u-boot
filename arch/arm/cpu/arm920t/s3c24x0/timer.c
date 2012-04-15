@@ -34,20 +34,43 @@
 
 #include <asm/io.h>
 #include <asm/arch/s3c24x0_cpu.h>
+#include <div64.h>
 
-int timer_load_val = 0;
-static ulong timer_clk;
+DECLARE_GLOBAL_DATA_PTR;
 
-/* macro to read the 16 bit timer */
-static inline ulong READ_TIMER(void)
+#define TIMER_PREDIV_2 0
+#define TIMER_PREDIV_4 1
+#define TIMER_PREDIV_8 2
+#define TIMER_PREDIV_16 3
+
+/*
+ * Timer is 16-bit
+ * So we can have good (small) timer resolution OR good (big) overlap time
+ * PCLK usualy 66 MHz
+ * PCLK / 2 / 33 = 1 MHz, 1 uS @ tick, overlap after 65 mS
+ * PCLK / 4 / 165 = 0.1 MHz ,10 uS @ tick, overlap after 650 mS
+ * PCLK / 16 / 165 = 0.025 MHz, 40 uS @ tick, overlap after 2,5 S
+ * ...etc
+ */
+
+#define TIMER_PRESCALER 165
+#define TIMER_PREDIV TIMER_PREDIV_4 //2, 4, 8, 16
+
+static inline unsigned long long tick_to_time(unsigned long long tick)
 {
-	struct s3c24x0_timers *timers = s3c24x0_get_base_timers();
+	tick *= CONFIG_SYS_HZ;
+	do_div(tick, gd->timer_rate_hz);
 
-	return readl(&timers->tcnto4) & 0xffff;
+	return tick;
 }
 
-static ulong timestamp;
-static ulong lastdec;
+static inline unsigned long long usec_to_tick(unsigned long long usec)
+{
+	usec *= gd->timer_rate_hz;
+	do_div(usec, 1000000);
+
+	return usec;
+}
 
 int timer_init(void)
 {
@@ -55,57 +78,47 @@ int timer_init(void)
 	ulong tmr;
 
 	/* use PWM Timer 4 because it has no output */
-	/* prescaler for Timer 4 is 16 */
-	writel(0x0f00, &timers->tcfg0);
-	if (timer_load_val == 0) {
-		/*
-		 * for 10 ms clock period @ PCLK with 4 bit divider = 1/2
-		 * (default) and prescaler = 16. Should be 10390
-		 * @33.25MHz and 15625 @ 50 MHz
-		 */
-		timer_load_val = get_PCLK() / (2 * 16 * 100);
-		timer_clk = get_PCLK() / (2 * 16);
-	}
-	/* load value for 10 ms timeout */
-	lastdec = timer_load_val;
-	writel(timer_load_val, &timers->tcntb4);
-	/* auto load, manual update of timer 4 */
+	/* prescaler for Timer */
+	writel(((TIMER_PRESCALER - 1) << 8) | (TIMER_PRESCALER - 1), &timers->tcfg0);
+	/* PREDIV */
+	writel((readl(&timers->tcfg1) & ~(0x0F << 16)) | (TIMER_PREDIV << 16), &timers->tcfg1);
+	/* Reload value */
+	writel(0xFFFF, &timers->tcntb4);
+	/* auto load, manual update of Timer 4 */
 	tmr = (readl(&timers->tcon) & ~0x0700000) | 0x0600000;
 	writel(tmr, &timers->tcon);
-	/* auto load, start timer 4 */
+	/* auto load, start Timer 4 */
 	tmr = (tmr & ~0x0700000) | 0x0500000;
 	writel(tmr, &timers->tcon);
-	timestamp = 0;
+
+	gd->lastinc = 0;
+	gd->timer_rate_hz = get_PCLK() / (TIMER_PRESCALER * (1 << (TIMER_PREDIV + 1)));
+	gd->tbu = gd->tbl = 0;
 
 	return (0);
 }
 
 /*
- * timer without interrupts
+ * macro to read the count-down 16 bit timer
  */
-ulong get_timer(ulong base)
+static inline ulong READ_TIMER16(void)
 {
-	return get_timer_masked() - base;
+	struct s3c24x0_timers *timers = s3c24x0_get_base_timers();
+
+	return (0xFFFF - ((readl(&timers->tcnto4) & 0xFFFF)));
 }
 
-void __udelay (unsigned long usec)
+static inline ulong READ_TIMER32(void)
 {
-	ulong tmo;
-	ulong start = get_ticks();
+	ulong now = READ_TIMER16();
+	ulong tbl = gd->tbl;
 
-	tmo = usec / 1000;
-	tmo *= (timer_load_val * 100);
-	tmo /= 1000;
+	if (now >= (tbl & 0xFFFF))
+		tbl = (tbl & 0xFFFF0000) | now;
+	else
+		tbl = ((tbl & 0xFFFF0000) | now) + 0x00010000;
 
-	while ((ulong) (get_ticks() - start) < tmo)
-		/*NOP*/;
-}
-
-ulong get_timer_masked(void)
-{
-	ulong tmr = get_ticks();
-
-	return tmr / (timer_clk / CONFIG_SYS_HZ);
+	return tbl;
 }
 
 void udelay_masked(unsigned long usec)
@@ -114,68 +127,71 @@ void udelay_masked(unsigned long usec)
 	ulong endtime;
 	signed long diff;
 
-	if (usec >= 1000) {
-		tmo = usec / 1000;
-		tmo *= (timer_load_val * 100);
-		tmo /= 1000;
-	} else {
-		tmo = usec * (timer_load_val * 100);
-		tmo /= (1000 * 1000);
-	}
+	tmo = usec_to_tick(usec); /* convert usecs to ticks */
 
 	endtime = get_ticks() + tmo;
 
 	do {
-		ulong now = get_ticks();
-		diff = endtime - now;
+			ulong now = get_ticks();
+			diff = endtime - now;
 	} while (diff >= 0);
 }
 
 /*
- * This function is derived from PowerPC code (read timebase as long long).
- * On ARM it just returns the timer value.
+ * Get the current 64 bit timer tick count
  */
 unsigned long long get_ticks(void)
 {
-	ulong now = READ_TIMER();
+	ulong now = READ_TIMER32();
 
-	if (lastdec >= now) {
-		/* normal mode */
-		timestamp += lastdec - now;
-	} else {
-		/* we have an overflow ... */
-		timestamp += lastdec + timer_load_val - now;
-	}
-	lastdec = now;
+	/* increment tbu if tbl has rolled over */
+	if (now < gd->tbl)
+		gd->tbu++;
+	gd->tbl = now;
+	return (((unsigned long long)gd->tbu) << 32) | gd->tbl;
+}
 
-	return timestamp;
+void __udelay(unsigned long usec)
+{
+	unsigned long long start;
+	unsigned long long tmo;
+
+	start = get_ticks(); /* get current timestamp */
+	tmo = usec_to_tick(usec); /* convert usecs to ticks */
+	if (tmo == 0)
+		tmo = 1;
+	while ((get_ticks() - start) < tmo)
+		; /* loop till time has passed */
 }
 
 /*
- * This function is derived from PowerPC code (timebase clock frequency).
- * On ARM it returns the number of timer ticks per second.
+ * get_timer(base) can be used to check for timeouts or
+ * to measure elasped time relative to an event:
+ *
+ * ulong start_time = get_timer(0) sets start_time to the current
+ * time value.
+ * get_timer(start_time) returns the time elapsed since then.
+ *
+ * The time is used in CONFIG_SYS_HZ units!
+ */
+ulong get_timer(ulong base)
+{
+	return get_timer_masked() - base;
+}
+
+ulong get_timer_masked (void)
+{
+	return tick_to_time(get_ticks());
+}
+
+/*
+ * Return the number of timer ticks per second.
  */
 ulong get_tbclk(void)
 {
-	ulong tbclk;
-
-#if defined(CONFIG_SMDK2400)
-	tbclk = timer_load_val * 100;
-#elif defined(CONFIG_SBC2410X) || \
-      defined(CONFIG_SMDK2410) || \
-	defined(CONFIG_S3C2440) || \
-      defined(CONFIG_VCMA9)
-	tbclk = CONFIG_SYS_HZ;
-#else
-#	error "tbclk not configured"
-#endif
-
-	return tbclk;
+	return gd->timer_rate_hz;
 }
 
-/*
- * reset the cpu by setting up the watchdog timer and let him time out
- */
 void reset_cpu(ulong ignored)
 {
 	struct s3c24x0_watchdog *watchdog;

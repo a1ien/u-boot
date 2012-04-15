@@ -56,9 +56,11 @@
 /*
  * Hardware drivers
  */
-//#define CONFIG_CS8900		/* we have a CS8900 on-board */
-//#define CONFIG_CS8900_BASE	0x19000300
-//#define CONFIG_CS8900_BUS16	/* the Linux driver does accesses as shorts */
+#define CONFIG_DRIVER_DM9000            1
+#define CONFIG_DRIVER_DM9000_NO_EEPROM  1
+#define CONFIG_DM9000_BASE              0x20000300
+#define DM9000_IO                       CONFIG_DM9000_BASE
+#define DM9000_DATA                     (CONFIG_DM9000_BASE+4)
 
 /*
  * select serial console configuration
@@ -70,8 +72,6 @@
  * USB support (currently only works with D-cache off)
  ************************************************************/
 #define CONFIG_USB_OHCI
-#define CONFIG_USB_KEYBOARD
-#define CONFIG_USB_STORAGE
 #define CONFIG_DOS_PARTITION
 
 /************************************************************
@@ -221,8 +221,6 @@
  */
 #define CONFIG_CMD_FAT
 #define CONFIG_CMD_EXT2
-#define CONFIG_CMD_UBI
-#define CONFIG_CMD_UBIFS
 #define CONFIG_CMD_MTDPARTS
 #define CONFIG_MTD_DEVICE
 #define CONFIG_MTD_PARTITIONS
