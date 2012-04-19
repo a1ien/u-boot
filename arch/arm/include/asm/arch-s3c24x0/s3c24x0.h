@@ -176,6 +176,9 @@ struct s3c2440_nand {
 	u32	nfstat;
 	u32	nfstat0;
 	u32	nfstat1;
+	u32 nfmecc0;
+	u32 nfmecc1;
+	u32 nfsecc;
 };
 #endif
 

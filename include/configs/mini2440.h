@@ -29,8 +29,6 @@
 #ifndef __CONFIG_H
 #define __CONFIG_H
 
-#define DEBUG 1
-
 /*
  * High Level Configuration Options
  * (easy to change)
@@ -44,7 +42,7 @@
 
 #define CONFIG_SYS_ARM_CACHE_WRITETHROUGH
 
-/* input clock of PLL (the SMDK2410 has 12MHz input clock) */
+/* input clock of PLL (the mini2440 has 12MHz input clock) */
 #define CONFIG_SYS_CLK_FREQ	12000000
 
 #undef CONFIG_USE_IRQ		/* we don't need IRQ/FIQ stuff */
@@ -119,11 +117,6 @@
 #define CONFIG_IPADDR		10.0.0.110
 #define CONFIG_SERVERIP		10.0.0.1
 
-#if defined(CONFIG_CMD_KGDB)
-#define CONFIG_KGDB_BAUDRATE	115200	/* speed to run kgdb serial port */
-/* what's this ? it's not used anywhere */
-#define CONFIG_KGDB_SER_INDEX	2	/* which serial port to use */
-#endif
 
 /*
  * Miscellaneous configurable options
@@ -189,7 +182,7 @@
 
 #define CONFIG_SYS_MAX_FLASH_BANKS	1
 #define CONFIG_SYS_FLASH_BANKS_LIST     { CONFIG_SYS_FLASH_BASE }
-#define CONFIG_SYS_MAX_FLASH_SECT	(19)
+#define CONFIG_SYS_MAX_FLASH_SECT	(35)
 
 #define CONFIG_ENV_ADDR			(CONFIG_SYS_FLASH_BASE + 0x070000)
 #define CONFIG_ENV_IS_IN_FLASH
@@ -210,8 +203,11 @@
  * NAND configuration
  */
 #ifdef CONFIG_CMD_NAND
+
 #define CONFIG_NAND_S3C2440
 #define CONFIG_SYS_S3C2440_NAND_HWECC
+//#define CONFIG_S3C2410_NAND_BBT 1
+//#define CONFIG_MTD_ECC_SOFT 1
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE		0x4E000000
 #endif

@@ -53,7 +53,7 @@ endif
 
 # clean the slate ...
 PLATFORM_RELFLAGS =
-PLATFORM_CPPFLAGS =
+PLATFORM_CPPFLAGS = -fno-schedule-insns -fno-schedule-insns2
 PLATFORM_LDFLAGS =
 
 #########################################################################
